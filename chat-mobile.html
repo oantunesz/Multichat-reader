@@ -568,9 +568,17 @@
   const TWITCH_STALE_MS = 90000; // sem nenhuma atividade (nem PING da Twitch) por 90s = conexão travada
 
   function connectTwitch(channel){
-    if(twitchWs){ try{ twitchWs.close(); }catch(e){} twitchWs = null; }
     if(twitchReconnectTimer){ clearTimeout(twitchReconnectTimer); twitchReconnectTimer = null; }
     if(twitchWatchdog){ clearInterval(twitchWatchdog); twitchWatchdog = null; }
+    if(twitchBadTimer){ clearTimeout(twitchBadTimer); twitchBadTimer = null; }
+    if(twitchWs){
+      // desliga os handlers antes de fechar, senão o onclose do socket antigo
+      // pode disparar depois que a conexão nova já estiver aberta e agendar
+      // uma reconexão duplicada, derrubando a conexão boa (loop de reconexão)
+      twitchWs.onopen = twitchWs.onmessage = twitchWs.onclose = twitchWs.onerror = null;
+      try{ twitchWs.close(); }catch(e){}
+      twitchWs = null;
+    }
     if(!channel){ setStatus('twitch','mid','nenhum canal definido'); return; }
 
     setStatus('twitch','mid','conectando...');
@@ -664,9 +672,14 @@
   const KICK_PUSHER_KEY = '32cbd69e4b950bf97679';
 
   async function connectKick(channelSlug, manualId){
-    if(kickWs){ try{ kickWs.close(); }catch(e){} kickWs = null; }
     if(kickPing){ clearInterval(kickPing); kickPing = null; }
     if(kickReconnectTimer){ clearTimeout(kickReconnectTimer); kickReconnectTimer = null; }
+    if(kickBadTimer){ clearTimeout(kickBadTimer); kickBadTimer = null; }
+    if(kickWs){
+      kickWs.onopen = kickWs.onmessage = kickWs.onclose = kickWs.onerror = null;
+      try{ kickWs.close(); }catch(e){}
+      kickWs = null;
+    }
     $('kickError').style.display = 'none';
 
     let chatroomId = (manualId || '').trim();
@@ -762,17 +775,33 @@
   // Ao voltar pro app/desbloquear a tela, reconecta na hora em vez de
   // esperar o timer de retry — reduz o tempo sem conexão depois de
   // um período em segundo plano (o iOS suspende WebSockets em background).
-  function ensureConnected(){
-    if(CONFIG.twitchChannel && (!twitchWs || twitchWs.readyState !== WebSocket.OPEN)){
-      connectTwitch(CONFIG.twitchChannel);
-    }
-    if((CONFIG.kickChannel || CONFIG.kickChatroomId) && (!kickWs || kickWs.readyState !== WebSocket.OPEN)){
-      connectKick(CONFIG.kickChannel, CONFIG.kickChatroomId);
-    }
-  }
+  // Ao voltar pro app/desbloquear a tela, força reconexão limpa dos dois.
+  // Checar readyState não é confiável em celular (o socket pode "parecer"
+  // aberto mesmo já estando morto) — reconectar do zero é mais garantido,
+  // e agora que os handlers do socket antigo são desligados antes de
+  // fechar, isso não gera mais loops de reconexão.
+  let lastForegroundReconnect = 0;
+  let hiddenAt = null;
   document.addEventListener('visibilitychange', () => {
-    if(document.visibilityState === 'visible') ensureConnected();
+    if(document.visibilityState === 'hidden'){
+      hiddenAt = Date.now();
+    }else if(document.visibilityState === 'visible'){
+      if(hiddenAt){
+        const gapMs = Date.now() - hiddenAt;
+        if(gapMs > 4000){
+          addSystemMessage(`App voltou do segundo plano — ${Math.round(gapMs/1000)}s fora, reconectando e mensagens desse período podem ter sido perdidas`);
+        }
+        hiddenAt = null;
+      }
+      ensureConnected();
+    }
   });
+  function ensureConnected(){
+    const now = Date.now();
+    if(now - lastForegroundReconnect < 2000) return; // evita disparos duplicados (visibilitychange + pageshow)
+    lastForegroundReconnect = now;
+    reconnectAll();
+  }
   window.addEventListener('pageshow', ensureConnected);
 
   // ---------- init ----------

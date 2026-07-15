@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<title>Chat Reader — Twitch + Kick</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0B0C10">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0B0C10;
+    --bg-elevated: #14161D;
+    --card: #1A1D26;
+    --line: rgba(255,255,255,0.08);
+    --text: #F2F4F7;
+    --muted: #8B92A5;
+    --twitch: #9146FF;
+    --kick: #53FC18;
+    --danger: #FF5252;
+    --msg-font-size: 16px;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  *{ box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body{
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    overscroll-behavior-y: contain;
+  }
+
+  #app{
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    height: 100vh;
+  }
+
+  /* ===== HEADER ===== */
+  #header{
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: calc(var(--safe-top) + 10px) 14px 10px;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--line);
+    z-index: 20;
+  }
+  #header h1{
+    font-size: 15px;
+    font-weight: 800;
+    margin: 0;
+    flex: 1;
+    letter-spacing: -0.2px;
+  }
+  .status-pills{
+    display: flex;
+    gap: 6px;
+  }
+  .pill{
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 20px;
+    background: rgba(255,255,255,0.06);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .pill .dot{ width: 6px; height: 6px; border-radius: 50%; background: #555; flex: none; }
+  .pill .dot.ok{ background: #3ddc6a; }
+  .pill .dot.bad{ background: var(--danger); }
+  .pill .dot.mid{ background: #ffb84d; }
+
+  #btn-settings{
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--line);
+    color: var(--text);
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ===== CHAT LOG ===== */
+  #chat-scroll{
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 10px 14px calc(var(--safe-bottom) + 16px);
+  }
+  #empty-state{
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+    margin-top: 40px;
+    line-height: 1.6;
+    display: none;
+  }
+  #empty-state.show{ display: block; }
+
+  .msg{
+    display: block;
+    width: 100%;
+    color: var(--text);
+    font-size: var(--msg-font-size);
+    line-height: 1.4;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    padding: 3px 0;
+    animation: fadeIn 0.15s ease-out;
+  }
+  @keyframes fadeIn{ from{ opacity: 0; } to{ opacity: 1; } }
+
+  .msg.hidden-platform{ display: none; }
+
+  .platform-badge{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    font-weight: 800;
+    font-size: 9px;
+    line-height: 1;
+    margin-right: 6px;
+    margin-bottom: -1px;
+    vertical-align: middle;
+  }
+  .badge-twitch{ background: var(--twitch); color: #fff; }
+  .badge-kick{ background: var(--kick); color: #0b0c10; }
+
+  .username{ font-weight: 700; }
+  .text img.emote{ height: 1.4em; vertical-align: middle; margin: 0 1px; }
+
+  .msg-system{
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    font-style: italic;
+    padding: 8px 10px;
+    margin: 4px 0;
+    border-top: 1px dashed var(--line);
+    border-bottom: 1px dashed var(--line);
+  }
+
+  /* ===== JUMP TO LATEST ===== */
+  #jump-latest{
+    position: absolute;
+    left: 50%;
+    bottom: calc(var(--safe-bottom) + 14px);
+    transform: translateX(-50%) translateY(20px);
+    background: linear-gradient(135deg, var(--twitch), var(--kick));
+    color: #0b0c10;
+    font-weight: 700;
+    font-size: 12px;
+    padding: 8px 16px;
+    border-radius: 20px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 15;
+  }
+  #jump-latest.show{ opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+
+  /* ===== SETTINGS SHEET ===== */
+  #sheet-backdrop{
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    z-index: 30;
+  }
+  #sheet-backdrop.open{ opacity: 1; pointer-events: auto; }
+
+  #sheet{
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    max-height: 86vh;
+    background: var(--bg-elevated);
+    border-radius: 18px 18px 0 0;
+    border-top: 1px solid var(--line);
+    transform: translateY(100%);
+    transition: transform 0.25s ease-out;
+    z-index: 31;
+    display: flex;
+    flex-direction: column;
+  }
+  #sheet.open{ transform: translateY(0); }
+
+  #sheet-handle{
+    width: 36px; height: 4px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 2px;
+    margin: 10px auto 4px;
+    flex: none;
+  }
+  #sheet-scroll{
+    overflow-y: auto;
+    padding: 10px 18px calc(var(--safe-bottom) + 20px);
+  }
+  #sheet h2{ font-size: 16px; margin: 4px 0 12px; }
+  #sheet label{
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    margin: 16px 0 6px;
+  }
+  #sheet label:first-of-type{ margin-top: 0; }
+  #sheet input[type=text]{
+    width: 100%;
+    padding: 12px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--text);
+    font-size: 16px;
+  }
+  #sheet input[type=range]{ width: 100%; accent-color: var(--twitch); }
+  #sheet details{ margin-top: 14px; }
+  #sheet summary{ cursor: pointer; color: var(--muted); font-size: 12px; padding: 6px 0; }
+  #sheet .hint{ color: var(--muted); font-size: 12px; line-height: 1.5; margin: 6px 0 0; }
+  #kickError{ color:#ff8a8a; font-size:12px; margin-top:6px; display:none; line-height:1.5; }
+
+  .toggle-row{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .toggle-row:last-child{ border-bottom: none; }
+  .toggle-row .label{ display:flex; align-items:center; gap:8px; font-size: 14px; font-weight: 600; }
+  .switch{
+    position: relative;
+    width: 44px; height: 26px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.12);
+    flex: none;
+  }
+  .switch input{ position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; }
+  .switch .knob{
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s, background 0.15s;
+  }
+  .switch input:checked + .knob{ transform: translateX(18px); }
+  .switch.tw input:checked + .knob{ background: var(--twitch); }
+  .switch.kk input:checked + .knob{ background: var(--kick); }
+
+  #sheet .actions{
+    display: flex; gap: 10px;
+    margin-top: 20px;
+    flex: none;
+  }
+  #sheet button{
+    flex: 1;
+    padding: 13px 10px;
+    border-radius: 10px;
+    border: none;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  #btn-save{ background: linear-gradient(135deg, var(--twitch), var(--kick)); color:#0b0c10; }
+  #btn-test{ background: rgba(255,255,255,0.08); color: var(--text); }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="header">
+    <h1>Chat Reader</h1>
+    <div class="status-pills">
+      <div class="pill"><div class="dot" id="dotTwitch"></div><span>Twitch</span></div>
+      <div class="pill"><div class="dot" id="dotKick"></div><span>Kick</span></div>
+    </div>
+    <div id="btn-settings">⚙</div>
+  </div>
+
+  <div id="chat-scroll">
+    <div id="empty-state">Nenhum canal configurado ainda.<br>Toque na engrenagem pra conectar sua Twitch e/ou Kick.</div>
+    <div id="chat-container"></div>
+  </div>
+
+  <div id="jump-latest">↓ novas mensagens</div>
+</div>
+
+<div id="sheet-backdrop"></div>
+<div id="sheet">
+  <div id="sheet-handle"></div>
+  <div id="sheet-scroll">
+    <h2>Configurações</h2>
+
+    <label for="twitchInput">Canal da Twitch</label>
+    <input type="text" id="twitchInput" placeholder="ex: gaules" autocapitalize="off" autocorrect="off">
+
+    <label for="kickInput">Canal da Kick</label>
+    <input type="text" id="kickInput" placeholder="ex: xqc" autocapitalize="off" autocorrect="off">
+    <div id="kickError"></div>
+
+    <details id="kickManualWrap">
+      <summary>ID manual do chat da Kick (caso a busca automática falhe)</summary>
+      <label for="kickIdInput">Chatroom ID</label>
+      <input type="text" id="kickIdInput" placeholder="ex: 259821" inputmode="numeric">
+      <p class="hint">Abra kick.com/api/v2/channels/SEUCANAL no navegador e procure por "chatroom":{"id": ...</p>
+    </details>
+
+    <details open>
+      <summary>Filtros e aparência</summary>
+
+      <div class="toggle-row">
+        <div class="label"><span class="platform-badge badge-twitch">T</span>Mostrar Twitch</div>
+        <div class="switch tw"><input type="checkbox" id="toggleTwitch" checked><div class="knob"></div></div>
+      </div>
+      <div class="toggle-row">
+        <div class="label"><span class="platform-badge badge-kick">K</span>Mostrar Kick</div>
+        <div class="switch kk"><input type="checkbox" id="toggleKick" checked><div class="knob"></div></div>
+      </div>
+
+      <label>Tamanho da fonte: <span id="sizeVal"></span>px</label>
+      <input type="range" id="sizeInput" min="13" max="24" value="16">
+
+      <label>Máx. de mensagens no histórico: <span id="maxVal"></span></label>
+      <input type="range" id="maxInput" min="20" max="300" value="150">
+    </details>
+
+    <div class="actions">
+      <button id="btn-test">Testar</button>
+      <button id="btn-save">Salvar e conectar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const STORAGE_KEY = 'chatMobileConfig_v1'; // isolado do chatOverlayConfig_v1 (OBS)
+
+  function loadConfig(){
+    let saved = {};
+    try{ saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }catch(e){}
+    return {
+      twitchChannel: saved.twitchChannel || '',
+      kickChannel: saved.kickChannel || '',
+      kickChatroomId: saved.kickChatroomId || '',
+      fontSize: saved.fontSize || 16,
+      maxMessages: saved.maxMessages || 150,
+      showTwitch: saved.showTwitch ?? true,
+      showKick: saved.showKick ?? true
+    };
+  }
+  function saveConfig(cfg){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg)); }catch(e){}
+  }
+
+  let CONFIG = loadConfig();
+  const $ = id => document.getElementById(id);
+
+  // ---------- sheet open/close ----------
+  const sheet = $('sheet'), backdrop = $('sheet-backdrop');
+  function openSheet(){ sheet.classList.add('open'); backdrop.classList.add('open'); }
+  function closeSheet(){ sheet.classList.remove('open'); backdrop.classList.remove('open'); }
+  $('btn-settings').addEventListener('click', openSheet);
+  backdrop.addEventListener('click', closeSheet);
+
+  function fillFormFromConfig(){
+    $('twitchInput').value = CONFIG.twitchChannel;
+    $('kickInput').value = CONFIG.kickChannel;
+    $('kickIdInput').value = CONFIG.kickChatroomId;
+    $('sizeInput').value = CONFIG.fontSize;
+    $('maxInput').value = CONFIG.maxMessages;
+    $('toggleTwitch').checked = CONFIG.showTwitch;
+    $('toggleKick').checked = CONFIG.showKick;
+    refreshRangeLabels();
+  }
+  function refreshRangeLabels(){
+    $('sizeVal').textContent = $('sizeInput').value;
+    $('maxVal').textContent = $('maxInput').value;
+  }
+  ['sizeInput','maxInput'].forEach(id => $(id).addEventListener('input', refreshRangeLabels));
+
+  $('btn-save').addEventListener('click', () => {
+    CONFIG = {
+      twitchChannel: $('twitchInput').value.trim().toLowerCase(),
+      kickChannel: $('kickInput').value.trim().toLowerCase(),
+      kickChatroomId: $('kickIdInput').value.trim(),
+      fontSize: parseInt($('sizeInput').value),
+      maxMessages: parseInt($('maxInput').value),
+      showTwitch: $('toggleTwitch').checked,
+      showKick: $('toggleKick').checked
+    };
+    saveConfig(CONFIG);
+    applyAppearance();
+    applyFilters();
+    reconnectAll();
+    closeSheet();
+  });
+
+  $('btn-test').addEventListener('click', () => {
+    addMessage('twitch', {username:'ViewerTwitch', text:'Mensagem de teste da Twitch! 🎮', color:'#ff8a3d'});
+    addMessage('kick', {username:'ViewerKick', text:'Mensagem de teste da Kick! 🔥', color:'#53FC18'});
+  });
+
+  ['toggleTwitch','toggleKick'].forEach(id => {
+    $(id).addEventListener('change', () => {
+      CONFIG.showTwitch = $('toggleTwitch').checked;
+      CONFIG.showKick = $('toggleKick').checked;
+      saveConfig(CONFIG);
+      applyFilters();
+    });
+  });
+
+  function applyAppearance(){
+    document.documentElement.style.setProperty('--msg-font-size', CONFIG.fontSize + 'px');
+  }
+  function applyFilters(){
+    document.querySelectorAll('.msg-twitch').forEach(el => el.classList.toggle('hidden-platform', !CONFIG.showTwitch));
+    document.querySelectorAll('.msg-kick').forEach(el => el.classList.toggle('hidden-platform', !CONFIG.showKick));
+  }
+
+  function setStatus(platform, state, label){
+    const dot = $(platform === 'twitch' ? 'dotTwitch' : 'dotKick');
+    dot.className = 'dot ' + (state === 'ok' ? 'ok' : state === 'bad' ? 'bad' : 'mid');
+    dot.title = label;
+  }
+
+  // ---------- helpers ----------
+  function escapeHtml(s){
+    const div = document.createElement('div');
+    div.textContent = s == null ? '' : s;
+    return div.innerHTML;
+  }
+  function colorFromName(name){
+    let hash = 0;
+    for(let i=0;i<name.length;i++){ hash = name.charCodeAt(i) + ((hash<<5)-hash); }
+    const hue = Math.abs(hash) % 360;
+    return `hsl(${hue}, 70%, 65%)`;
+  }
+  function applyTwitchEmotes(text, emotesTag){
+    if(!emotesTag) return escapeHtml(text);
+    const entries = [];
+    emotesTag.split('/').forEach(group=>{
+      const [id, positions] = group.split(':');
+      if(!positions) return;
+      positions.split(',').forEach(pos=>{
+        const [start,end] = pos.split('-').map(Number);
+        if(!isNaN(start) && !isNaN(end)) entries.push({id, start, end});
+      });
+    });
+    entries.sort((a,b)=>a.start-b.start);
+    let result = '', cursor = 0;
+    entries.forEach(e=>{
+      result += escapeHtml(text.slice(cursor, e.start));
+      const alt = text.slice(e.start, e.end+1);
+      result += `<img class="emote" src="https://static-cdn.jtvnw.net/emoticons/v2/${e.id}/default/dark/2.0" alt="${escapeHtml(alt)}" onerror="this.replaceWith(document.createTextNode(this.alt))">`;
+      cursor = e.end + 1;
+    });
+    result += escapeHtml(text.slice(cursor));
+    return result;
+  }
+  function applyKickEmotes(text){
+    return escapeHtml(text).replace(/\[emote:(\d+):([^\]]+)\]/g, (m, id, name)=>{
+      return `<img class="emote" src="https://files.kick.com/emotes/${id}/fullsize" alt=":${escapeHtml(name)}:" onerror="this.replaceWith(document.createTextNode(this.alt))">`;
+    });
+  }
+
+  // ---------- rendering ----------
+  const container = $('chat-container');
+  const scrollBox = $('chat-scroll');
+  const emptyState = $('empty-state');
+  const jumpBtn = $('jump-latest');
+
+  function isNearBottom(){
+    return scrollBox.scrollHeight - scrollBox.scrollTop - scrollBox.clientHeight < 80;
+  }
+  function scrollToBottom(){
+    scrollBox.scrollTop = scrollBox.scrollHeight;
+    jumpBtn.classList.remove('show');
+  }
+  jumpBtn.addEventListener('click', scrollToBottom);
+  scrollBox.addEventListener('scroll', () => {
+    if(isNearBottom()) jumpBtn.classList.remove('show');
+  });
+
+  function addSystemMessage(text){
+    const wasNearBottom = isNearBottom();
+    const row = document.createElement('div');
+    row.className = 'msg msg-system';
+    row.textContent = text;
+    container.appendChild(row);
+    while(container.children.length > CONFIG.maxMessages){
+      container.removeChild(container.firstChild);
+    }
+    if(wasNearBottom) scrollToBottom(); else jumpBtn.classList.add('show');
+  }
+
+  function addMessage(platform, {username, text, color, emotesTag}){
+    emptyState.classList.remove('show');
+    const wasNearBottom = isNearBottom();
+
+    const row = document.createElement('div');
+    row.className = `msg msg-${platform}`;
+    if(platform === 'twitch' && !CONFIG.showTwitch) row.classList.add('hidden-platform');
+    if(platform === 'kick' && !CONFIG.showKick) row.classList.add('hidden-platform');
+
+    const badge = document.createElement('span');
+    badge.className = `platform-badge badge-${platform}`;
+    badge.textContent = platform === 'twitch' ? 'T' : 'K';
+    row.appendChild(badge);
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'username';
+    nameSpan.style.color = color || colorFromName(username || '?');
+    nameSpan.textContent = username || '???';
+    row.appendChild(nameSpan);
+
+    row.appendChild(document.createTextNode(':\u00A0'));
+
+    const textSpan = document.createElement('span');
+    textSpan.className = 'text';
+    textSpan.innerHTML = platform === 'twitch'
+      ? applyTwitchEmotes(text || '', emotesTag)
+      : applyKickEmotes(text || '');
+    row.appendChild(textSpan);
+
+    container.appendChild(row);
+
+    while(container.children.length > CONFIG.maxMessages){
+      container.removeChild(container.firstChild);
+    }
+
+    if(wasNearBottom){
+      scrollToBottom();
+    }else{
+      jumpBtn.classList.add('show');
+    }
+  }
+
+  // ---------- TWITCH ----------
+  let twitchWs = null;
+  let twitchReconnectTimer = null;
+  let twitchBadTimer = null;
+  let twitchDisconnectedAt = null;
+  let twitchLastActivity = null;
+  let twitchWatchdog = null;
+  const TWITCH_STALE_MS = 90000; // sem nenhuma atividade (nem PING da Twitch) por 90s = conexão travada
+
+  function connectTwitch(channel){
+    if(twitchWs){ try{ twitchWs.close(); }catch(e){} twitchWs = null; }
+    if(twitchReconnectTimer){ clearTimeout(twitchReconnectTimer); twitchReconnectTimer = null; }
+    if(twitchWatchdog){ clearInterval(twitchWatchdog); twitchWatchdog = null; }
+    if(!channel){ setStatus('twitch','mid','nenhum canal definido'); return; }
+
+    setStatus('twitch','mid','conectando...');
+    twitchWs = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+
+    twitchWs.onopen = () => {
+      const nick = 'justinfan' + Math.floor(Math.random()*99999);
+      twitchWs.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
+      twitchWs.send('PASS SCHMOOPIE');
+      twitchWs.send(`NICK ${nick}`);
+      twitchWs.send(`JOIN #${channel}`);
+      setStatus('twitch','ok','conectado a #' + channel);
+      twitchLastActivity = Date.now();
+      if(twitchBadTimer){ clearTimeout(twitchBadTimer); twitchBadTimer = null; }
+      if(twitchDisconnectedAt){
+        const gapMs = Date.now() - twitchDisconnectedAt;
+        if(gapMs > 4000){
+          addSystemMessage(`Twitch reconectada — ${Math.round(gapMs/1000)}s sem conexão, mensagens desse período podem ter sido perdidas`);
+        }
+        twitchDisconnectedAt = null;
+      }
+      // watchdog: se ficar sem nenhuma atividade (nem PING da Twitch) por muito
+      // tempo, a conexão provavelmente morreu silenciosamente (comum em rede
+      // celular/iOS) sem disparar onclose. Força reconexão nesse caso.
+      twitchWatchdog = setInterval(()=>{
+        if(twitchLastActivity && Date.now() - twitchLastActivity > TWITCH_STALE_MS){
+          try{ twitchWs.close(); }catch(e){}
+          connectTwitch(channel);
+        }
+      }, 20000);
+    };
+
+    twitchWs.onmessage = (e) => {
+      twitchLastActivity = Date.now();
+      const lines = e.data.split('\r\n').filter(Boolean);
+      for(const line of lines){
+        if(line.startsWith('PING')){
+          twitchWs.send('PONG :tmi.twitch.tv');
+          continue;
+        }
+        if(line.includes('PRIVMSG')){
+          const parsed = parseTwitchLine(line);
+          if(parsed) addMessage('twitch', parsed);
+        }
+      }
+    };
+
+    twitchWs.onclose = () => {
+      if(twitchWatchdog){ clearInterval(twitchWatchdog); twitchWatchdog = null; }
+      if(!twitchDisconnectedAt) twitchDisconnectedAt = Date.now();
+      setStatus('twitch','mid','reconectando...');
+      if(!twitchBadTimer){
+        twitchBadTimer = setTimeout(()=>{
+          if(!twitchWs || twitchWs.readyState !== WebSocket.OPEN){
+            setStatus('twitch','bad','sem conexão há um tempo');
+          }
+        }, 15000);
+      }
+      twitchReconnectTimer = setTimeout(()=>connectTwitch(channel), 3000);
+    };
+    twitchWs.onerror = () => {};
+  }
+
+  function parseTwitchLine(line){
+    let tagsPart = '', rest = line;
+    if(line.startsWith('@')){
+      const idx = line.indexOf(' ');
+      tagsPart = line.slice(1, idx);
+      rest = line.slice(idx+1);
+    }
+    const tags = {};
+    tagsPart.split(';').forEach(t=>{
+      const eq = t.indexOf('=');
+      if(eq === -1) return;
+      tags[t.slice(0,eq)] = t.slice(eq+1);
+    });
+    const match = rest.match(/^:([^!]+)!.*PRIVMSG #[^ ]+ :(.*)$/);
+    if(!match) return null;
+    const username = tags['display-name'] || match[1];
+    const text = match[2];
+    const color = tags['color'] && tags['color'] !== '' ? tags['color'] : null;
+    return { username, text, color, emotesTag: tags['emotes'] };
+  }
+
+  // ---------- KICK ----------
+  let kickWs = null;
+  let kickPing = null;
+  let kickReconnectTimer = null;
+  let kickBadTimer = null;
+  let kickDisconnectedAt = null;
+  const KICK_PUSHER_KEY = '32cbd69e4b950bf97679';
+
+  async function connectKick(channelSlug, manualId){
+    if(kickWs){ try{ kickWs.close(); }catch(e){} kickWs = null; }
+    if(kickPing){ clearInterval(kickPing); kickPing = null; }
+    if(kickReconnectTimer){ clearTimeout(kickReconnectTimer); kickReconnectTimer = null; }
+    $('kickError').style.display = 'none';
+
+    let chatroomId = (manualId || '').trim();
+
+    if(!chatroomId){
+      if(!channelSlug){ setStatus('kick','mid','nenhum canal definido'); return; }
+      setStatus('kick','mid','buscando ID do canal...');
+      try{
+        const res = await fetch(`https://kick.com/api/v2/channels/${channelSlug}`);
+        if(!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        chatroomId = data.chatroom && data.chatroom.id;
+        if(!chatroomId) throw new Error('chatroom não encontrado');
+      }catch(err){
+        setStatus('kick','bad','falha ao buscar ID automaticamente');
+        const errBox = $('kickError');
+        errBox.style.display = 'block';
+        errBox.textContent = 'Não foi possível obter o ID automaticamente. Abra kick.com/api/v2/channels/' + channelSlug + ' no navegador, procure por "chatroom":{"id": e cole o número no campo "ID manual" acima, depois salve de novo.';
+        $('kickManualWrap').open = true;
+        return;
+      }
+    }
+
+    setStatus('kick','mid','conectando...');
+    kickWs = new WebSocket(`wss://ws-us2.pusher.com/app/${KICK_PUSHER_KEY}?protocol=7&client=js&version=8.4.0&flash=false`);
+
+    kickWs.onopen = () => {
+      kickWs.send(JSON.stringify({event:'pusher:subscribe', data:{auth:'', channel:`chatrooms.${chatroomId}.v2`}}));
+      setStatus('kick','ok','conectado (chatroom ' + chatroomId + ')');
+      if(kickBadTimer){ clearTimeout(kickBadTimer); kickBadTimer = null; }
+      if(kickDisconnectedAt){
+        const gapMs = Date.now() - kickDisconnectedAt;
+        if(gapMs > 4000){
+          addSystemMessage(`Kick reconectada — ${Math.round(gapMs/1000)}s sem conexão, mensagens desse período podem ter sido perdidas`);
+        }
+        kickDisconnectedAt = null;
+      }
+      kickPing = setInterval(()=>{
+        try{ kickWs.send(JSON.stringify({event:'pusher:ping', data:{}})); }catch(e){}
+      }, 25000);
+    };
+
+    kickWs.onmessage = (e) => {
+      let payload;
+      try{ payload = JSON.parse(e.data); }catch(err){ return; }
+      const parsed = parseKickPayload(payload);
+      if(parsed) addMessage('kick', parsed);
+    };
+
+    kickWs.onclose = () => {
+      if(kickPing){ clearInterval(kickPing); kickPing = null; }
+      if(!kickDisconnectedAt) kickDisconnectedAt = Date.now();
+      setStatus('kick','mid','reconectando...');
+      if(!kickBadTimer){
+        kickBadTimer = setTimeout(()=>{
+          if(!kickWs || kickWs.readyState !== WebSocket.OPEN){
+            setStatus('kick','bad','sem conexão há um tempo');
+          }
+        }, 15000);
+      }
+      kickReconnectTimer = setTimeout(()=>connectKick(channelSlug, chatroomId), 4000);
+    };
+    kickWs.onerror = () => {};
+  }
+
+  function parseKickPayload(payload){
+    if(!payload || !payload.event) return null;
+    let data;
+    try{ data = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data; }catch(e){ return null; }
+
+    if(payload.event === 'App\\Events\\ChatMessageEvent'){
+      const sender = data.sender || {};
+      const identity = sender.identity || {};
+      return {
+        username: sender.username,
+        text: data.content,
+        color: identity.color || null
+      };
+    }
+    if(payload.event === 'App\\Events\\ChatMessageSentEvent'){
+      const user = data.user || {};
+      const message = data.message || {};
+      return { username: user.username, text: message.message, color: null };
+    }
+    return null;
+  }
+
+  function reconnectAll(){
+    connectTwitch(CONFIG.twitchChannel);
+    connectKick(CONFIG.kickChannel, CONFIG.kickChatroomId);
+  }
+
+  // Ao voltar pro app/desbloquear a tela, reconecta na hora em vez de
+  // esperar o timer de retry — reduz o tempo sem conexão depois de
+  // um período em segundo plano (o iOS suspende WebSockets em background).
+  function ensureConnected(){
+    if(CONFIG.twitchChannel && (!twitchWs || twitchWs.readyState !== WebSocket.OPEN)){
+      connectTwitch(CONFIG.twitchChannel);
+    }
+    if((CONFIG.kickChannel || CONFIG.kickChatroomId) && (!kickWs || kickWs.readyState !== WebSocket.OPEN)){
+      connectKick(CONFIG.kickChannel, CONFIG.kickChatroomId);
+    }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible') ensureConnected();
+  });
+  window.addEventListener('pageshow', ensureConnected);
+
+  // ---------- init ----------
+  applyAppearance();
+  fillFormFromConfig();
+  if(!CONFIG.twitchChannel && !CONFIG.kickChannel){
+    emptyState.classList.add('show');
+    openSheet();
+  }else{
+    reconnectAll();
+  }
+})();
+</script>
+</body>
+</html>
